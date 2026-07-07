@@ -69,20 +69,21 @@ export const roomStream = defineSse({
 ### Server (planned `@alivan/ts-sse/server`)
 
 ```ts
-// one contract → one handler. Mount the returned handler at whatever path your framework uses.
-export const handler = toFetchResponse(
-  roomStream,
-  async ({ query, lastEventId, emit, signal }) => {
-    emit.retry(3000);                     // runtime: write a `retry:` line now
+import { sseResponse } from "@alivan/ts-sse/server";
+import { roomStream } from "./contract";
+
+// sseResponse(contract, req, fn) returns a WHATWG Response — you return it from your route.
+// Works in Hono / Next App Router / Bun / Deno / Workers. No server-creation config.
+export const GET = (req: Request) =>
+  sseResponse(roomStream, req, async ({ query, lastEventId, emit, signal, init }) => {
+    init({ heartbeat: 15000, retry: 3000 });        // RUNTIME stream setup (heartbeat timer + retry:)
     emit.presence({ online: roomSize() });
-    // lastEventId is ALWAYS provided (browser's Last-Event-ID header); decode it yourself
-    for await (const m of stream({ since: query.since ?? lastEventId, signal })) {
-      await emit.chat(m, { id: m.id });   // attach `id` to make THIS event resumable (id optional)
-    }                                     // await = natural backpressure
-    emit.close();                         // writes `event: ts-sse-eos`, then ends the stream
-  },
-  { heartbeat: 15000 },                   // heartbeat is a RUNTIME adapter option
-);
+    const since = query.since ?? lastEventId;       // query is validated server-side
+    for await (const m of stream({ since, signal })) {
+      await emit.chat(m, { id: m.id });             // await = backpressure; id makes it resumable
+    }
+    // returning normally sends the EOS sentinel (terminal). Throw/drop → client reconnects.
+  });
 ```
 
 ### Client (planned `@alivan/ts-sse/client`)
@@ -133,6 +134,52 @@ streams), and you get a dramatically smaller surface — one transport, no open-
 classification, no reconnect policy to own. A project that later needs headers or POST reaches
 for a *separate* opt-in fetch transport; it is not something the core contract pretends to
 support.
+
+### 3.2 Server model — return a `Response`
+
+`sseResponse(contract, req, fn)` returns a WHATWG `Response` — you return it straight from
+your route. The body is a `text/event-stream` `ReadableStream<Uint8Array>`; `fn` runs in the
+background feeding it through a typed `emit`. Because it's just a `Response`, it works in any
+fetch runtime — Hono, Next App Router, Bun, Deno, Workers. (Node's `http` needs a thin
+`toNodeHandler` adapter; later.) There is **no server-creation config** — everything tunable
+is set at runtime, inside the handler.
+
+So yes — on the surface it *is* "return a `Response`". Underneath, a small engine handles the
+parts EventSource-grade streaming actually needs:
+
+- **`init({ heartbeat, retry })`** — RUNTIME stream setup, called *inside* the handler (not at
+  creation). Starts the idle-gated heartbeat timer (`: keep-alive` comments, §4.4) and writes
+  the initial `retry:` line. Consistent with §4.3: nothing only the running handler can decide
+  is baked into server creation.
+- **`emit`** — `emit.<event>(data, { id? })` typed from the contract (INPUT side, §4.1), plus
+  `emit.retry(ms)` / `emit.comment(text)` / `emit.close()`. Each returns a Promise that
+  resolves on **flush**, so `await emit.x(...)` is natural backpressure (§4.4).
+- **disconnect** — `ctx.signal` (an `AbortSignal`) fires when the client goes away
+  (`request.signal`); thread it into your loops so cursors/timers clean up.
+- **lifecycle** — a normal return sends the `ts-sse-eos` sentinel (terminal; browser stops).
+  An uncaught throw closes the stream **without** the sentinel → the browser reconnects.
+  `emit.close()` is an explicit early EOS.
+- **query** — validated server-side against the contract's `query` schema; a bad query is a
+  `400` *before* the stream opens.
+
+Response headers the adapter sets: `Content-Type: text/event-stream`, `Cache-Control:
+no-cache, no-transform`, `Connection: keep-alive`, `X-Accel-Buffering: no`.
+
+**Outputs.** Internally it is all one `FrameSink` (`write(bytes): Promise` / `close()` /
+`signal`), so every target is a thin adapter over the same serializer — identical wire bytes
+wherever they go:
+
+- `sseResponse(contract, req, fn) → Response` — fetch runtimes (Hono, Next, Bun, Deno,
+  Workers). **Ship first.**
+- `toNodeHandler(contract, fn) → (req, res)` — Node `http` / Express / Fastify; writes to the
+  `ServerResponse` with `res.write()` / `'drain'` backpressure. **Ship second — biggest
+  coverage jump.**
+- `sseStream(contract, req, fn) → { stream, headers }` — the raw `ReadableStream` + headers,
+  for callers that build their own `Response` or want to tee/compose the stream.
+- `pipeSse(contract, fn, sink)` — write frames into any `WritableStream` / `Writable` you
+  already hold.
+
+`FrameSink` is the public seam: anyone can adapt to a target we do not ship, without forking.
 
 ## 4. The four hard forks (resolved, `tsc`-verified)
 
@@ -236,9 +283,10 @@ per-event client-side validation, which nothing above has.**
 2. **`client`** ✅ — `initClient(contract, { url })` over native **`EventSource` only**
    (GET, cookie auth, browser-owned reconnect + automatic `Last-Event-ID` resume), typed
    `query` on `subscribe`, `.on` + async iterator over the decoded union, 3 error channels.
-3. **`server`** *(next)* — `initServer`, typed `emit.<name>` (resumable-gated opts),
-   `FrameSink` (flush-promise backpressure), `CoordinatedWriter` + heartbeat,
-   `toFetchResponse`. This closes the loop for a real end-to-end demo.
+3. **`server`** *(next)* — `sseResponse(contract, req, fn)` returning a `Response`; runtime
+   `ctx.init({ heartbeat, retry })`, typed `emit` with flush-promise backpressure, a
+   `FrameSink` + idle-gated heartbeat, EOS lifecycle, server-side `query` validation. Node
+   adapter later.
 4. **`react`**, Node server adapter, OpenAPI-ish event catalog docs.
 
 [Standard Schema v1]: https://standardschema.dev
