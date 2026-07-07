@@ -66,12 +66,8 @@ class FakeEventSource implements EventSourceLike {
 function makeConfig(overrides: Partial<TransportConfig> = {}): TransportConfig {
   return {
     url: "https://example.test/sse?room=1",
-    method: "GET",
-    headers: {},
     eventNames: ["chat", "presence"],
     withCredentials: true,
-    reconnect: false,
-    fetchImpl: fetch,
     EventSourceImpl: FakeEventSource as unknown as EventSourceCtor,
     ...overrides,
   };
@@ -220,5 +216,33 @@ describe("eventSourceTransport — close()", () => {
     // A second close() is a no-op — the source is not closed twice.
     transport.close();
     expect(es.closeCount).toBe(1);
+  });
+});
+
+describe("eventSourceTransport — caller abort signal", () => {
+  it("closes the source when config.signal aborts", () => {
+    const controller = new AbortController();
+    const { handlers } = boot({ signal: controller.signal });
+    const es = FakeEventSource.instances[0]!;
+    expect(es.closeCount).toBe(0);
+
+    controller.abort();
+
+    expect(es.closeCount).toBe(1);
+    expect(es.readyState).toBe(2);
+
+    // Post-abort teardown behaves like close(): late native events reach no handler.
+    es.emit("chat", { data: "late" });
+    expect(handlers.onFrame).not.toHaveBeenCalled();
+  });
+
+  it("closes the source immediately when config.signal is already aborted at start()", () => {
+    const { handlers } = boot({ signal: AbortSignal.abort() });
+    const es = FakeEventSource.instances[0]!;
+    expect(es.closeCount).toBe(1);
+    expect(es.readyState).toBe(2);
+
+    es.emit("open");
+    expect(handlers.onOpen).not.toHaveBeenCalled();
   });
 });

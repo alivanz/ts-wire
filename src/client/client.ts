@@ -1,41 +1,42 @@
 /**
- * `initClient` — the transport-agnostic ORCHESTRATOR.
+ * `initClient` — the transport-agnostic ORCHESTRATOR for ONE SSE endpoint.
  *
- * It turns a contract (a `Record<string, SseDef>`) into a `{ route.subscribe() }`
- * client. A `subscribe()` call:
+ * A contract is a single {@link SseDef} (`{ query?, events }`), so `initClient`
+ * returns a single {@link SseEndpoint} with one `.subscribe()`. There is no path,
+ * no method, no router: the full endpoint URL lives in `options.url`, and the
+ * optional `query` schema types + validates the query string on `subscribe`.
  *
- *   1. resolves the request (URL + params + query, awaited headers, JSON body),
- *   2. picks a {@link Transport} via {@link selectTransport} (DESIGN §4),
+ * A `subscribe(args?)` call:
+ *
+ *   1. builds the final URL SYNCHRONOUSLY (base `options.url` + validated query),
+ *   2. starts the injected {@link Transport} (native EventSource only),
  *   3. wires the four {@link TransportHandlers} callbacks to the three disjoint
- *      client channels (DESIGN §4.4): data (`.on` + async-iterator),
- *      `onConnectionError` (the ONLY reconnect driver), and `onValidationError`.
+ *      client channels: data (`.on` + async-iterator), `onConnectionError` (the
+ *      reconnect signal), and `onValidationError` (decode failures).
  *
- * This file is deliberately decoupled from the concrete transports: the real
- * `fetch-transport.ts` / `eventsource-transport.ts` factories are injected through
- * the `deps` seam (see {@link ClientDeps}). That keeps `client.ts` unit-testable
- * with a fake transport and free of any static import of the network layer.
+ * This file never statically imports the network layer — the real EventSource
+ * transport factory is injected through the `deps` seam (see {@link ClientDeps}),
+ * which keeps `client.ts` unit-testable with a fake transport.
  *
- * The decoder invariant (DESIGN §4.1) lives in {@link decodeFrame}: the wire carries
- * a schema's INPUT JSON, so the client re-runs the schema INPUT→OUTPUT and hands the
- * consumer the OUTPUT value. That is why a genuinely non-round-tripping transform
- * (`z.string().transform(s => s.length)`) decodes `"hello"` on the wire to `5`.
+ * The decoder invariant lives in {@link createSubscription}'s `decodeFrame`: the
+ * wire carries a schema's INPUT JSON, so the client re-runs the schema INPUT→OUTPUT
+ * and hands the consumer the OUTPUT value. That is why a genuinely non-round-tripping
+ * transform (`z.string().transform(s => s.length)`) decodes `"hello"` to `5`.
  */
 import type { EventsMap } from "../core/schema.js";
 import { validateSync } from "../core/schema.js";
-import type { HttpMethod, SseDef } from "../core/contract.js";
+import type { SseDef } from "../core/contract.js";
 import type { RawFrame } from "../core/wire.js";
 import { TS_SSE_EOS } from "../core/wire.js";
 import type { SseConnectionError, SseValidationError } from "./errors.js";
 import type {
+  AnySubscribeArgs,
   ClientEvent,
   EventMeta,
-  HeaderValue,
   InitClientOptions,
-  ReconnectPolicy,
-  SseClient,
   SseClientState,
+  SseEndpoint,
   SseSubscription,
-  SubscribeArgs,
   Transport,
   TransportConfig,
   TransportFactory,
@@ -46,118 +47,52 @@ import type {
 // ── Injection seam ────────────────────────────────────────────────────────────
 
 /**
- * The real transports, injected by the barrel (`src/client/index.ts`) so this file
- * never statically imports the network layer. Tests pass a fake pair here.
+ * The real EventSource transport, injected by the barrel (`src/client/index.ts`)
+ * so this file never statically imports the network layer. Tests pass a fake here.
  *
- * When it is absent, `subscribe()` throws a clear "transports not wired" error: the
- * integrator is expected to always provide it, and doing so synchronously surfaces a
- * misconfiguration immediately instead of as a stalled subscription.
+ * When it is absent, `subscribe()` throws a clear "transport not wired" error: the
+ * integrator is expected to always provide it, and surfacing that synchronously
+ * flags a misconfiguration immediately instead of as a stalled subscription.
  */
 export interface ClientDeps {
-  transports?: {
-    eventsource: TransportFactory;
-    fetch: TransportFactory;
-  };
+  transport?: TransportFactory;
 }
 
-// ── Reconnect defaults ─────────────────────────────────────────────────────────
+// ── initClient ────────────────────────────────────────────────────────────────
 
-/**
- * The reconnect policy the client resolves when the caller supplies only a partial
- * one (or none). The transport owns the retry loop; `initClient` just fills the gaps.
- * `backoffMs` honours the server's `retry:`/`Retry-After` hint, else a capped
- * exponential (1s, 2s, 4s … ≤ 30s).
- */
-const DEFAULT_RECONNECT: ReconnectPolicy = {
-  retries: Infinity,
-  backoffMs: (attempt, serverRetryMs) =>
-    serverRetryMs ?? Math.min(30_000, 1_000 * 2 ** Math.max(0, attempt - 1)),
-};
-
-function resolveReconnect(
-  reconnect: InitClientOptions["reconnect"],
-): ReconnectPolicy | false {
-  if (reconnect === false) return false;
-  if (reconnect === undefined) return DEFAULT_RECONNECT;
-  return {
-    retries: reconnect.retries ?? DEFAULT_RECONNECT.retries,
-    backoffMs: reconnect.backoffMs ?? DEFAULT_RECONNECT.backoffMs,
-  };
-}
-
-// ── Transport selection (DESIGN §4) ────────────────────────────────────────────
-
-/**
- * Decide which transport a route+args should use under `options.transport`.
- *
- * `mode = options.transport ?? "auto"`. An explicit `"eventsource"`/`"fetch"` wins.
- * `"auto"` only reaches for native EventSource when it can actually serve the
- * request: a header-less, body-less, non-resuming GET, and an `EventSource` impl was
- * provided. Anything EventSource cannot express (a body, custom headers it cannot
- * set, a `Last-Event-ID` seed, a non-GET method) falls back to the fetch transport.
- */
-export function selectTransport(
-  method: HttpMethod,
-  args: SubscribeArgs | undefined,
-  options: InitClientOptions,
-  hasResolvedCustomHeaders: boolean,
-): "eventsource" | "fetch" {
-  const mode = options.transport ?? "auto";
-  if (mode === "eventsource" || mode === "fetch") return mode;
-
-  const canUseEventSource =
-    method === "GET" &&
-    args?.body === undefined &&
-    args?.resumeFrom === undefined &&
-    !hasResolvedCustomHeaders &&
-    options.EventSource !== undefined;
-
-  return canUseEventSource ? "eventsource" : "fetch";
-}
-
-// ── initClient ──────────────────────────────────────────────────────────────
-
-export function initClient<C extends Record<string, SseDef>>(
-  contract: C,
+export function initClient<D extends SseDef>(
+  contract: D,
   options: InitClientOptions,
   deps?: ClientDeps,
-): SseClient<C> {
-  const transports = deps?.transports;
+): SseEndpoint<D> {
+  // The endpoint's public `subscribe` is generic over `D` (typed query + event
+  // union); the internal `createSubscription` works on the structural `EventsMap`
+  // and loose runtime args. The single cast re-attaches the contract's literal
+  // types at the boundary.
+  const subscribe = (args?: AnySubscribeArgs): SseSubscription<EventsMap> =>
+    createSubscription(contract, options, deps?.transport, args);
 
-  // One `{ subscribe }` entry per contract route. The value types are erased to the
-  // structural `EventsMap` here and re-attached by the final `as SseClient<C>` cast —
-  // the route-literal generics flow through `SseClient<C>` unchanged.
-  const client: Record<
-    string,
-    { subscribe(args?: SubscribeArgs): SseSubscription<EventsMap> }
-  > = {};
-
-  for (const routeKey of Object.keys(contract)) {
-    const route = contract[routeKey] as SseDef;
-    client[routeKey] = {
-      subscribe: (args?: SubscribeArgs) =>
-        createSubscription(route, options, transports, args),
-    };
-  }
-
-  return client as SseClient<C>;
+  return { subscribe } as unknown as SseEndpoint<D>;
 }
 
 // ── One live subscription ─────────────────────────────────────────────────────
 
 function createSubscription(
-  route: SseDef,
+  contract: SseDef,
   options: InitClientOptions,
-  transports: ClientDeps["transports"],
-  args: SubscribeArgs | undefined,
+  transport: TransportFactory | undefined,
+  args: AnySubscribeArgs | undefined,
 ): SseSubscription<EventsMap> {
-  // `subscribe()` returns synchronously, but building a transport is inescapably
-  // async (a HeaderValue may be a `() => Promise<string>`). So this is a programmer
-  // error we can and should report right away, not a runtime stream failure.
-  if (!transports) {
+  // Build the URL first: an invalid query is a programmer error, reported eagerly
+  // (a throw from `subscribe`) rather than as a runtime stream failure.
+  const url = buildUrl(contract, options, args);
+
+  // `subscribe()` is now fully synchronous, so a missing transport is likewise a
+  // programmer error we can report right away.
+  if (!transport) {
     throw new Error(
-      "ts-sse: transports not wired — call initClient(contract, options, { transports }). " +
-        "The @alivan/ts-sse/client barrel supplies the real fetch/eventsource factories.",
+      "ts-sse: transport not wired — call initClient(contract, options, { transport }). " +
+        "The @alivan/ts-sse/client barrel supplies it.",
     );
   }
 
@@ -252,7 +187,17 @@ function createSubscription(
     const mode = options.onValidationError ?? "skip";
     if (mode === "throw") fail(err); // the async-iterator rejects with the error
     else if (mode === "emit") emitValidationError(err);
-    // "skip" → silently drop the frame.
+    // "skip" (default) → silently drop the frame.
+  }
+
+  // ── Terminal helpers ────────────────────────────────────────────────────────
+
+  /** Server-driven clean close: fire onClose listeners once, complete the iterator. */
+  function handleClose(): void {
+    if (state === "closed") return; // idempotent; also guards against a post-fatal close
+    state = "closed";
+    for (const cb of closeListeners) cb();
+    finish();
   }
 
   // ── Frame decoding (the decoder invariant) ─────────────────────────────────
@@ -266,9 +211,9 @@ function createSubscription(
       return;
     }
 
-    const schema = route.events[raw.event];
+    const schema = contract.events[raw.event];
     if (schema === undefined) {
-      // Unknown event: skip-with-onValidationError (DESIGN — no schema to run).
+      // Unknown event: skip-with-onValidationError (no schema to run).
       emitValidationError({
         event: raw.event,
         issues: makeIssues(`ts-sse: no schema for event '${raw.event}'`),
@@ -323,31 +268,9 @@ function createSubscription(
     push(event);
   }
 
-  // ── Terminal helpers ────────────────────────────────────────────────────────
-
-  /** Server-driven clean close: fire onClose listeners once, complete the iterator. */
-  function handleClose(): void {
-    if (state === "closed") return; // idempotent; also guards against a post-fatal close
-    state = "closed";
-    for (const cb of closeListeners) cb();
-    finish();
-  }
-
-  let transport: Transport | undefined;
-  let userClosed = false;
-
-  /** Caller-driven permanent stop: cancel reconnection and complete the iterator. */
-  function close(): void {
-    if (userClosed) return;
-    userClosed = true;
-    state = "closed";
-    finish();
-    transport?.close(); // may be undefined if we close before the async start; idempotent
-  }
-
   // ── Transport handlers (the three disjoint channels) ────────────────────────
 
-  const handlers: TransportHandlers = {
+  const transportHandlers: TransportHandlers = {
     onOpen() {
       state = "open";
       for (const cb of openListeners) cb();
@@ -356,7 +279,7 @@ function createSubscription(
       decodeFrame(frame);
     },
     onError(err) {
-      // The ONLY reconnect-driving channel.
+      // The reconnect-driving channel.
       for (const cb of connErrorListeners) cb(err);
       if (err.retriable) {
         // Transport is retrying; the iterator keeps yielding (stays pending).
@@ -372,19 +295,29 @@ function createSubscription(
     },
   };
 
-  // ── Async request build + transport start (deferred, non-blocking) ──────────
-  void (async () => {
-    try {
-      const { config, hasCustomHeaders } = await buildTransportConfig(route, options, args);
-      if (userClosed) return; // closed before we could start
-      const kind = selectTransport(route.method, args, options, hasCustomHeaders);
-      transport = transports[kind](config, handlers);
-      transport.start();
-    } catch (err) {
-      // A missing path param or a rejected header function is fatal for this stream.
-      if (!userClosed) fail(err);
-    }
-  })();
+  // ── Transport start (synchronous — no async header resolution) ──────────────
+
+  const config: TransportConfig = {
+    url,
+    eventNames: Object.keys(contract.events),
+    withCredentials: options.withCredentials,
+    EventSourceImpl: options.EventSource,
+    signal: args?.signal,
+  };
+
+  const t: Transport = transport(config, transportHandlers);
+  t.start();
+
+  let userClosed = false;
+
+  /** Caller-driven permanent stop: close the transport and complete the iterator. */
+  function close(): void {
+    if (userClosed) return;
+    userClosed = true;
+    state = "closed";
+    finish();
+    t.close(); // idempotent
+  }
 
   // ── Public subscription surface ─────────────────────────────────────────────
 
@@ -425,78 +358,39 @@ function createSubscription(
   return subscription;
 }
 
-// ── Request building (URL + headers + body) ────────────────────────────────────
+// ── URL building (base URL + validated query string) ────────────────────────────
 
 /**
- * Resolve everything a transport needs. Async because a {@link HeaderValue} may be a
- * `() => Promise<string>`. `hasCustomHeaders` = the caller supplied at least one
- * header (base or per-subscribe) — native EventSource cannot set those, so it feeds
- * {@link selectTransport}.
+ * Build the final endpoint URL. The contract has no path, so we start from
+ * `options.url`. When the contract declares a `query` schema we validate the
+ * caller's `args.query` (defaulting to `{}`) against it — on failure this THROWS,
+ * because an invalid query is a programmer error — then append the validated OUTPUT
+ * as a query string (skipping null/undefined, `String()`-ing the rest). With no
+ * query schema, `options.url` is used as-is and any `args.query` is ignored.
  */
-async function buildTransportConfig(
-  route: SseDef,
+function buildUrl(
+  contract: SseDef,
   options: InitClientOptions,
-  args: SubscribeArgs | undefined,
-): Promise<{ config: TransportConfig; hasCustomHeaders: boolean }> {
-  // baseHeaders first, per-subscribe headers override.
-  const headerSources: Record<string, HeaderValue> = {
-    ...options.baseHeaders,
-    ...args?.headers,
-  };
-  const hasCustomHeaders = Object.keys(headerSources).length > 0;
+  args: AnySubscribeArgs | undefined,
+): string {
+  if (contract.query === undefined) return options.url;
 
-  const headers: Record<string, string> = {};
-  for (const [name, value] of Object.entries(headerSources)) {
-    headers[name] = typeof value === "function" ? await value() : value;
+  const res = validateSync(contract.query, args?.query ?? {});
+  if (!res.ok) {
+    throw new Error(
+      `ts-sse: invalid query: ${res.issues.map((i) => i.message).join("; ")}`,
+    );
   }
 
-  // JSON body forces a Content-Type (unless the caller set one already).
-  let body: string | undefined;
-  if (args?.body !== undefined) {
-    body = JSON.stringify(args.body);
-    if (!hasHeader(headers, "content-type")) headers["Content-Type"] = "application/json";
-  }
-
-  const config: TransportConfig = {
-    url: buildUrl(route.path, options.baseUrl, args),
-    method: route.method,
-    headers,
-    body,
-    eventNames: Object.keys(route.events),
-    resumeFrom: args?.resumeFrom,
-    withCredentials: options.withCredentials,
-    reconnect: resolveReconnect(options.reconnect),
-    fetchImpl: options.fetch ?? fetch,
-    EventSourceImpl: options.EventSource,
-    signal: args?.signal,
-  };
-
-  return { config, hasCustomHeaders };
-}
-
-/** `baseUrl` + path with `:param` substituted (encoded) + a query string. */
-function buildUrl(path: string, baseUrl: string, args: SubscribeArgs | undefined): string {
-  const filledPath = path.replace(/:([A-Za-z0-9_]+)/g, (_match, name: string) => {
-    const value = args?.params?.[name];
-    if (value === undefined) {
-      throw new Error(`ts-sse: missing path parameter ':${name}' for '${path}'`);
-    }
-    return encodeURIComponent(String(value));
-  });
-
+  const validated = res.value as Record<string, unknown>;
   const search = new URLSearchParams();
-  if (args?.query) {
-    for (const [key, value] of Object.entries(args.query)) {
-      if (value === undefined) continue; // skip undefined
-      search.append(key, String(value)); // stringify numbers/booleans
-    }
+  for (const [key, value] of Object.entries(validated)) {
+    if (value === undefined || value === null) continue; // skip null/undefined
+    search.append(key, String(value)); // stringify numbers/booleans/etc.
   }
-  const qs = search.toString();
-  return qs ? `${baseUrl}${filledPath}?${qs}` : `${baseUrl}${filledPath}`;
-}
 
-/** Case-insensitive header presence check. */
-function hasHeader(headers: Record<string, string>, name: string): boolean {
-  const target = name.toLowerCase();
-  return Object.keys(headers).some((key) => key.toLowerCase() === target);
+  const qs = search.toString();
+  if (!qs) return options.url;
+  const sep = options.url.includes("?") ? "&" : "?";
+  return `${options.url}${sep}${qs}`;
 }

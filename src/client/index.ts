@@ -1,28 +1,23 @@
 /**
  * Public entry for `@alivan/ts-sse/client`.
  *
- * `client.ts` is deliberately transport-agnostic (testable with fakes). This barrel
- * is the one place that wires the real fetch + EventSource transports, so end users
- * just call `initClient(contract, options)` with nothing to inject.
+ * `client.ts` is transport-agnostic (testable with a fake). This barrel is the one
+ * place that wires the real native-EventSource transport, so end users just call
+ * `initClient(contract, options)`.
  */
 import { initClient as initClientCore } from "./client.js";
-import { fetchTransport } from "./fetch-transport.js";
 import { eventSourceTransport } from "./eventsource-transport.js";
 import type { SseDef } from "../core/contract.js";
-import type { InitClientOptions, SseClient } from "./types.js";
+import type { InitClientOptions, SseEndpoint } from "./types.js";
 
-/** Create a fully-typed SSE client from a contract, with the real transports wired in. */
-export function initClient<C extends Record<string, SseDef>>(
-  contract: C,
+/** Create a fully-typed SSE client from a contract, with the EventSource transport wired in. */
+export function initClient<D extends SseDef>(
+  contract: D,
   options: InitClientOptions,
-): SseClient<C> {
-  return initClientCore(contract, options, {
-    transports: { fetch: fetchTransport, eventsource: eventSourceTransport },
-  });
+): SseEndpoint<D> {
+  return initClientCore(contract, options, { transport: eventSourceTransport });
 }
 
-export { selectTransport } from "./client.js";
-export { fetchTransport } from "./fetch-transport.js";
 export { eventSourceTransport } from "./eventsource-transport.js";
 export * from "./errors.js";
 export * from "./types.js";

@@ -3,21 +3,16 @@
  *
  * Native EventSource is deliberately limited, and those limits shape this transport:
  *
- *   - it is GET-only and cannot set request headers or send a body;
+ *   - it is GET-only: no request headers, no body, no resume seed;
  *   - it OWNS its reconnect loop — on a drop it reconnects on its own, re-sending the
- *     `Last-Event-ID` it tracked internally. So, unlike `fetch-transport.ts`, this
- *     transport implements NO reconnect logic of its own: the browser is in charge.
+ *     `Last-Event-ID` it tracked internally. So this transport implements NO reconnect
+ *     logic of its own: the browser is in charge.
  *   - it cannot wildcard-listen, so we must `addEventListener` once per known event
  *     name (from {@link TransportConfig.eventNames}) plus the default `"message"`.
  *
- * Because of the GET/no-header limits, `client.ts` only ever routes plain GET, no-body,
- * no-header, no-resume subscriptions here; anything richer goes to the fetch transport.
- *
- * NOTE on `config.resumeFrom`: native EventSource exposes no way to seed its
- * `Last-Event-ID`, so a caller-requested resume cannot be honoured here. The client
- * never routes a seeded/resumable subscription to this transport (it forces `fetch`),
- * so we intentionally ignore `resumeFrom` (and `headers`/`body`/`method`, likewise
- * unsettable on native EventSource).
+ * A caller-supplied {@link TransportConfig.signal} tears the source down: when it aborts
+ * (or is already aborted at `start()`) we invoke `close()`, so an external `AbortSignal`
+ * ends the subscription just like an explicit `close()` does.
  */
 import type {
   EventSourceLike,
@@ -38,6 +33,13 @@ export const eventSourceTransport: TransportFactory = (config, handlers) => {
   // Set the instant we permanently stop. Every listener callback checks it first so a
   // native event that fires after teardown is silently dropped — no handler runs late.
   let closed = false;
+  // The caller's abort signal, remembered so `close()` can detach its listener.
+  let abortSignal: AbortSignal | undefined;
+
+  /** Caller aborted (via `config.signal`) — tear the source down like an explicit close. */
+  function onAbort(): void {
+    close();
+  }
 
   /** Translate one native message event into a {@link RawFrame}, or terminate on EOS. */
   function onData(ev: MessageEventLike): void {
@@ -112,6 +114,18 @@ export const eventSourceTransport: TransportFactory = (config, handlers) => {
         }),
       );
     });
+
+    // Wire the caller's abort: an already-aborted signal tears down immediately; otherwise
+    // an `abort` later routes to `close()`. `close()` detaches this listener.
+    const signal = config.signal;
+    if (signal !== undefined) {
+      abortSignal = signal;
+      if (signal.aborted) {
+        close();
+        return;
+      }
+      signal.addEventListener("abort", onAbort);
+    }
   }
 
   function close(): void {
@@ -119,6 +133,7 @@ export const eventSourceTransport: TransportFactory = (config, handlers) => {
     // checks, ensures no handler fires after teardown.
     if (closed) return;
     closed = true;
+    abortSignal?.removeEventListener("abort", onAbort);
     es?.close();
   }
 
