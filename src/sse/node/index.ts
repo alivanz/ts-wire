@@ -5,13 +5,26 @@
  * to include in the barrel even for edge builds.
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { SseDef } from "../core/contract.js";
-import { validateSync } from "../core/schema.js";
-import type { StandardSchemaV1 } from "../core/schema.js";
-import { runStream } from "./run.js";
-import { NodeSink } from "./sink.js";
-import { SSE_HEADERS } from "./response.js";
-import type { SseHandler } from "./types.js";
+import type { SseDef } from "../contract.js";
+import { validateSync } from "../../core/schema.js";
+import type { StandardSchemaV1 } from "../../core/schema.js";
+import { runStream } from "../server/run.js";
+import { NodeSink } from "../server/sink.js";
+import { SSE_HEADERS } from "../fetch/index.js";
+import type { SseHandler } from "../server/types.js";
+
+// Public handler-facing types (also re-exported from ts-wire/sse/fetch).
+export type {
+  Emit,
+  EmitControls,
+  EmitOpts,
+  FrameSink,
+  InitOptions,
+  QueryOutput,
+  SseContext,
+  SseHandler,
+} from "../server/types.js";
+export { SinkAbortedError } from "../server/sink.js";
 
 type QueryResult =
   | { ok: true; value: Record<string, unknown> }

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { z } from "zod";
-import { defineSse, sseType } from "../src/core/contract.js";
+import { defineSse, sseType } from "../src/sse/contract.js";
 import type { InferIn, InferOut } from "../src/core/schema.js";
 
 // ── tiny type-level assertion kit ────────────────────────────────────────────

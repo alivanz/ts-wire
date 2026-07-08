@@ -13,8 +13,8 @@
  * output — see DESIGN.md "the decoder invariant".
  */
 import type { OutgoingFrame } from "./wire.js";
-import type { InferIn, StandardSchemaV1 } from "./schema.js";
-import { validateSync } from "./schema.js";
+import type { InferIn, StandardSchemaV1 } from "../core/schema.js";
+import { validateSync } from "../core/schema.js";
 
 /** Single UTF-8 encoder, reused across all frames (encoders are stateless + cheap to share). */
 const encoder = new TextEncoder();

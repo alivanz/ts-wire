@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { EventEmitter } from "node:events";
 import { z } from "zod";
-import { defineSse } from "../src/core/contract.js";
-import { parseSseText } from "../src/core/parse.js";
-import { toNodeHandler } from "../src/server/node.js";
+import { defineSse } from "../src/sse/contract.js";
+import { parseSseText } from "../src/sse/parse.js";
+import { toNodeHandler } from "../src/sse/node/index.js";
 
 const concat = (arr: Uint8Array[]): Uint8Array => {
   const out = new Uint8Array(arr.reduce((n, a) => n + a.length, 0));

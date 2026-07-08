@@ -1,15 +1,15 @@
 import { describe, it, expect, vi } from "vitest";
 import { z } from "zod";
-import { defineSse } from "../src/core/contract.js";
-import { initClient, type ClientDeps } from "../src/client/client.js";
+import { defineSse } from "../src/sse/contract.js";
+import { initClient, type ClientDeps } from "../src/sse/client/client.js";
 import type {
   InitClientOptions,
   Transport,
   TransportConfig,
   TransportFactory,
   TransportHandlers,
-} from "../src/client/types.js";
-import { SseConnectionError } from "../src/client/errors.js";
+} from "../src/sse/client/types.js";
+import { SseConnectionError } from "../src/sse/client/errors.js";
 
 // ── Fake transport ──────────────────────────────────────────────────────────
 // Captures the `config` and `handlers` each factory call receives and lets the

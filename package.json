@@ -1,7 +1,7 @@
 {
-  "name": "@alivan/ts-sse",
+  "name": "ts-wire",
   "version": "0.0.0",
-  "description": "Contract-first Server-Sent Events for TypeScript — ts-rest, but for SSE",
+  "description": "Contract-first realtime for TypeScript — ts-rest, but for SSE (and WebSocket)",
   "type": "module",
   "packageManager": "pnpm@10.32.1",
   "engines": {
@@ -18,13 +18,21 @@
       "types": "./dist/core/index.d.ts",
       "import": "./dist/core/index.js"
     },
-    "./client": {
-      "types": "./dist/client/index.d.ts",
-      "import": "./dist/client/index.js"
+    "./sse": {
+      "types": "./dist/sse/index.d.ts",
+      "import": "./dist/sse/index.js"
     },
-    "./server": {
-      "types": "./dist/server/index.d.ts",
-      "import": "./dist/server/index.js"
+    "./sse/client": {
+      "types": "./dist/sse/client/index.d.ts",
+      "import": "./dist/sse/client/index.js"
+    },
+    "./sse/fetch": {
+      "types": "./dist/sse/fetch/index.d.ts",
+      "import": "./dist/sse/fetch/index.js"
+    },
+    "./sse/node": {
+      "types": "./dist/sse/node/index.d.ts",
+      "import": "./dist/sse/node/index.js"
     }
   },
   "files": [
@@ -40,9 +48,11 @@
     "clean": "rm -rf dist"
   },
   "keywords": [
+    "realtime",
     "sse",
     "server-sent-events",
     "eventsource",
+    "websocket",
     "contract",
     "type-safe",
     "typescript",

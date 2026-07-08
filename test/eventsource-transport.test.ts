@@ -1,13 +1,13 @@
 import { describe, it, expect, vi } from "vitest";
-import { eventSourceTransport } from "../src/client/eventsource-transport.js";
+import { eventSourceTransport } from "../src/sse/client/eventsource-transport.js";
 import type {
   EventSourceCtor,
   EventSourceLike,
   MessageEventLike,
   TransportConfig,
-} from "../src/client/types.js";
-import { SseConnectionError } from "../src/client/errors.js";
-import type { RawFrame } from "../src/core/wire.js";
+} from "../src/sse/client/types.js";
+import { SseConnectionError } from "../src/sse/client/errors.js";
+import type { RawFrame } from "../src/sse/wire.js";
 
 /**
  * A fully in-memory EventSource. It records the constructor args + every listener so a

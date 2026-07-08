@@ -3,12 +3,25 @@
  * your route (Hono / Next App Router / Bun / Deno / Workers). `sseStream` exposes the
  * raw stream + headers for callers that build their own `Response`.
  */
-import type { SseDef } from "../core/contract.js";
-import { validateSync } from "../core/schema.js";
-import type { StandardSchemaV1 } from "../core/schema.js";
-import { runStream } from "./run.js";
-import { ResponseSink } from "./sink.js";
-import type { SseHandler } from "./types.js";
+import type { SseDef } from "../contract.js";
+import { validateSync } from "../../core/schema.js";
+import type { StandardSchemaV1 } from "../../core/schema.js";
+import { runStream } from "../server/run.js";
+import { ResponseSink } from "../server/sink.js";
+import type { SseHandler } from "../server/types.js";
+
+// Public handler-facing types (also re-exported from ts-wire/sse/node).
+export type {
+  Emit,
+  EmitControls,
+  EmitOpts,
+  FrameSink,
+  InitOptions,
+  QueryOutput,
+  SseContext,
+  SseHandler,
+} from "../server/types.js";
+export { SinkAbortedError } from "../server/sink.js";
 
 /** Headers every SSE response needs — long-lived, unbuffered, uncompressed. */
 export const SSE_HEADERS: Record<string, string> = {

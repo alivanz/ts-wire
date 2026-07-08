@@ -6,9 +6,9 @@
  * from the contract's `events` map (the decoded OUTPUT side) and its optional `query`
  * schema (the INPUT side, typed on `subscribe`).
  */
-import type { EventsMap, InferIn, InferOut, StandardSchemaV1 } from "../core/schema.js";
-import type { SseDef } from "../core/contract.js";
-import type { RawFrame } from "../core/wire.js";
+import type { EventsMap, InferIn, InferOut, StandardSchemaV1 } from "../../core/schema.js";
+import type { SseDef } from "../contract.js";
+import type { RawFrame } from "../wire.js";
 import type { SseConnectionError, SseValidationError } from "./errors.js";
 
 // ── Public surface ───────────────────────────────────────────────────────────

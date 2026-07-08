@@ -6,7 +6,7 @@ import {
   serializeComment,
   serializeRetry,
   toOutgoingFrame,
-} from "../src/core/serialize.js";
+} from "../src/sse/serialize.js";
 
 const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
 

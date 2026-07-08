@@ -3,8 +3,8 @@
  * `fn(ctx)` — the ctx carries the validated `query`, the inbound `lastEventId`, a
  * disconnect `signal`, the typed `emit`, and a runtime `init(...)` for stream setup.
  */
-import type { EventsMap, InferIn, InferOut, StandardSchemaV1 } from "../core/schema.js";
-import type { SseDef } from "../core/contract.js";
+import type { EventsMap, InferIn, InferOut, StandardSchemaV1 } from "../../core/schema.js";
+import type { SseDef } from "../contract.js";
 
 /** The single frame-writing seam every output (Response / Node / ...) implements. */
 export interface FrameSink {

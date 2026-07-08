@@ -4,8 +4,8 @@
  * `method`, and no router. The URL is supplied at connect time (client) / mount time
  * (server); native EventSource is always a GET.
  */
-import type { EventsMap, StandardSchemaV1, TypeMarker } from "./schema.js";
-import { typeMarker } from "./schema.js";
+import type { EventsMap, StandardSchemaV1, TypeMarker } from "../core/schema.js";
+import { typeMarker } from "../core/schema.js";
 
 export { TS_SSE_EOS } from "./wire.js";
 

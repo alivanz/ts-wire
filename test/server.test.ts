@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { z } from "zod";
-import { defineSse } from "../src/core/contract.js";
-import { parseSseStream } from "../src/core/parse.js";
-import { sseResponse } from "../src/server/response.js";
-import type { RawFrame } from "../src/core/wire.js";
+import { defineSse } from "../src/sse/contract.js";
+import { parseSseStream } from "../src/sse/parse.js";
+import { sseResponse } from "../src/sse/fetch/index.js";
+import type { RawFrame } from "../src/sse/wire.js";
 
 /** Drain a Response's SSE body into decoded frames (comments/heartbeats are skipped). */
 const collect = async (res: Response): Promise<RawFrame[]> => {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseSseText, createSseParser, parseSseStream } from "../src/core/parse.js";
+import { parseSseText, createSseParser, parseSseStream } from "../src/sse/parse.js";
 
 const encode = (text: string): Uint8Array => new TextEncoder().encode(text);
 

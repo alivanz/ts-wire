@@ -9,10 +9,10 @@
  * Output adapters (`sseResponse`, `toNodeHandler`, ...) all funnel through here; only
  * the sink differs.
  */
-import type { EventsMap } from "../core/schema.js";
-import type { SseDef } from "../core/contract.js";
-import { TS_SSE_EOS } from "../core/wire.js";
-import { serializeComment, serializeFrame, serializeRetry, toOutgoingFrame } from "../core/serialize.js";
+import type { EventsMap } from "../../core/schema.js";
+import type { SseDef } from "../contract.js";
+import { TS_SSE_EOS } from "../wire.js";
+import { serializeComment, serializeFrame, serializeRetry, toOutgoingFrame } from "../serialize.js";
 import type { Emit, EmitOpts, FrameSink, InitOptions, RunBase, SseContext } from "./types.js";
 import { CoordinatedWriter, startHeartbeat, type HeartbeatController } from "./sink.js";
 

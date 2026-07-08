@@ -23,11 +23,11 @@
  * and hands the consumer the OUTPUT value. That is why a genuinely non-round-tripping
  * transform (`z.string().transform(s => s.length)`) decodes `"hello"` to `5`.
  */
-import type { EventsMap } from "../core/schema.js";
-import { validateSync } from "../core/schema.js";
-import type { SseDef } from "../core/contract.js";
-import type { RawFrame } from "../core/wire.js";
-import { TS_SSE_EOS } from "../core/wire.js";
+import type { EventsMap } from "../../core/schema.js";
+import { validateSync } from "../../core/schema.js";
+import type { SseDef } from "../contract.js";
+import type { RawFrame } from "../wire.js";
+import { TS_SSE_EOS } from "../wire.js";
 import type { SseConnectionError, SseValidationError } from "./errors.js";
 import type {
   AnySubscribeArgs,
@@ -47,7 +47,7 @@ import type {
 // ── Injection seam ────────────────────────────────────────────────────────────
 
 /**
- * The real EventSource transport, injected by the barrel (`src/client/index.ts`)
+ * The real EventSource transport, injected by the barrel (`src/sse/client/index.ts`)
  * so this file never statically imports the network layer. Tests pass a fake here.
  *
  * When it is absent, `subscribe()` throws a clear "transport not wired" error: the
@@ -92,7 +92,7 @@ function createSubscription(
   if (!transport) {
     throw new Error(
       "ts-sse: transport not wired — call initClient(contract, options, { transport }). " +
-        "The @alivan/ts-sse/client barrel supplies it.",
+        "The ts-wire/sse/client barrel supplies it.",
     );
   }
 

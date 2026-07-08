@@ -10,7 +10,7 @@
  */
 import type { ServerResponse } from "node:http";
 import type { FrameSink } from "./types.js";
-import { serializeComment } from "../core/serialize.js";
+import { serializeComment } from "../serialize.js";
 
 /** Thrown from `write()`/`close()` once the client has disconnected. */
 export class SinkAbortedError extends Error {

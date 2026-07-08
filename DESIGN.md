@@ -1,9 +1,15 @@
-# ts-sse — Design
+# ts-wire / sse — Design
 
 Contract-first Server-Sent Events for TypeScript. **ts-rest, but the response is a
-validated, resumable stream of named events.**
+validated, resumable stream of named events.** The one-way sibling of the WS package, under
+the same `ts-wire` umbrella.
 
-Package: `@alivan/ts-sse` · Validator: any [Standard Schema v1] · Status: core + client shipped, server next.
+Package: `ts-wire/sse` · Validator: any [Standard Schema v1] · Status: core + client + server shipped.
+
+> **Project reframe.** `ts-sse` → **`ts-wire`**: one shared `core` (Standard Schema infer,
+> per-event validation, the decoder invariant) with two *independent* transports — `sse`
+> (one-way, this doc) and `ws` (bidirectional, see `DESIGN-ws.md`). Same primitives, separate
+> abstractions: `defineSse` / `defineWs`. (The npm rename is forced anyway — `ts-sse` is taken.)
 
 **Scope: native `EventSource` only.** The contract models *only* what the browser's
 `EventSource` can actually do — a one-way GET stream, cookie auth, browser-owned reconnect
@@ -21,7 +27,7 @@ one fact buys:
   same schema object. No build step, no generated SDK to drift.
 - **Breaking changes become compile errors across a runtime boundary** where the two
   sides share no runtime code. The client imports the contract `type`-only.
-- **True 3-way decoupling.** Contract → server (`initServer` fills handlers) → client
+- **True 3-way decoupling.** Contract → server (`sseResponse` runs the handler) → client
   (`initClient` consumes). Stronger than tRPC, where the router *is* the contract and
   server + client weld through an `AppRouter` type.
 - **Discriminated unions force exhaustive handling** — which maps *perfectly* onto SSE.
@@ -36,7 +42,7 @@ one endpoint** — no router, no `path` in the contract; the URL is supplied at 
 
 ```
 responses: { 200: Post, 404: Err }        // ts-rest
-events:    { message: Msg, ping: Ping }    // ts-sse   ← the whole idea
+events:    { message: Msg, ping: Ping }    // sse      ← the whole idea
 ```
 
 From that one `events` map both public surfaces fall out mechanically:
@@ -51,7 +57,7 @@ From that one `events` map both public surfaces fall out mechanically:
 ### Contract
 
 ```ts
-import { defineSse } from "@alivan/ts-sse/core";
+import { defineSse } from "ts-wire/sse";
 import { z } from "zod"; // any Standard Schema v1 validator
 
 // one contract = one SSE endpoint — no `path`, no router
@@ -66,14 +72,14 @@ export const roomStream = defineSse({
 // no path/config here — the URL is given at connect time; retry/resume/heartbeat are RUNTIME.
 ```
 
-### Server (planned `@alivan/ts-sse/server`)
+### Server — `ts-wire/sse/fetch` (fetch runtimes) · `ts-wire/sse/node` (Node)
 
 ```ts
-import { sseResponse } from "@alivan/ts-sse/server";
+import { sseResponse } from "ts-wire/sse/fetch";  // Node: import { toNodeHandler } from "ts-wire/sse/node"
 import { roomStream } from "./contract";
 
 // sseResponse(contract, req, fn) returns a WHATWG Response — you return it from your route.
-// Works in Hono / Next App Router / Bun / Deno / Workers. No server-creation config.
+// One impl for every fetch runtime: Hono / Next App Router / Bun / Deno / CF Workers. No creation config.
 export const GET = (req: Request) =>
   sseResponse(roomStream, req, async ({ query, lastEventId, emit, signal, init }) => {
     init({ heartbeat: 15000, retry: 3000 });        // RUNTIME stream setup (heartbeat timer + retry:)
@@ -86,10 +92,11 @@ export const GET = (req: Request) =>
   });
 ```
 
-### Client (planned `@alivan/ts-sse/client`)
+### Client — `ts-wire/sse/client`
 
 ```ts
-import { roomStream } from "./contract"; // type-only import is enough
+import { initClient } from "ts-wire/sse/client";
+import { roomStream } from "./contract"; // the contract is a type-only import
 
 // the full endpoint URL is given here — the contract has no path
 const room = initClient(roomStream, { url: "https://api.example.com/rooms/42/stream" });
@@ -109,7 +116,7 @@ for await (const ev of sub) {
 ### 3.1 Why EventSource-only
 
 SSE is one-way: the browser opens a stream, the server pushes, and nothing flows back on that
-connection. ts-sse targets the **native browser `EventSource`** and nothing else — no
+connection. `ts-wire/sse` targets the **native browser `EventSource`** and nothing else — no
 `fetch`+`ReadableStream` fallback. That keeps the contract honest: it can only express what
 `EventSource` can actually do.
 
@@ -135,17 +142,22 @@ classification, no reconnect policy to own. A project that later needs headers o
 for a *separate* opt-in fetch transport; it is not something the core contract pretends to
 support.
 
-### 3.2 Server model — return a `Response`
+### 3.2 Server model — platform subpaths over one engine
 
-`sseResponse(contract, req, fn)` returns a WHATWG `Response` — you return it straight from
-your route. The body is a `text/event-stream` `ReadableStream<Uint8Array>`; `fn` runs in the
-background feeding it through a typed `emit`. Because it's just a `Response`, it works in any
-fetch runtime — Hono, Next App Router, Bun, Deno, Workers. (Node's `http` needs a thin
-`toNodeHandler` adapter; later.) There is **no server-creation config** — everything tunable
-is set at runtime, inside the handler.
+The handler `fn` is written **once**; only the output adapter differs by runtime, so it ships
+per-platform subpath (the same pattern as the WS package — but unlike WS, the SSE `fn` is
+fully portable across them):
 
-So yes — on the surface it *is* "return a `Response`". Underneath, a small engine handles the
-parts EventSource-grade streaming actually needs:
+- **`ts-wire/sse/fetch`** — `sseResponse(contract, req, fn) → Response`. One implementation for
+  *every* fetch runtime (Hono, Next App Router, Bun, Deno, CF Workers): SSE over a
+  `text/event-stream` `ReadableStream` is uniform there, so no per-edge split is needed.
+- **`ts-wire/sse/node`** — `toNodeHandler(contract, fn) → (req, res)`. Node `http` / Express /
+  Fastify write to a `ServerResponse` (`res.write()` + `'drain'` backpressure), which a fetch
+  `Response` can't model — hence its own subpath.
+
+Both drive the same engine and the same `fn`, and there is **no server-creation config** —
+everything tunable is set at runtime, inside the handler. Underneath, a small engine handles
+the parts EventSource-grade streaming actually needs:
 
 - **`init({ heartbeat, retry })`** — RUNTIME stream setup, called *inside* the handler (not at
   creation). Starts the idle-gated heartbeat timer (`: keep-alive` comments, §4.4) and writes
@@ -165,21 +177,16 @@ parts EventSource-grade streaming actually needs:
 Response headers the adapter sets: `Content-Type: text/event-stream`, `Cache-Control:
 no-cache, no-transform`, `Connection: keep-alive`, `X-Accel-Buffering: no`.
 
-**Outputs.** Internally it is all one `FrameSink` (`write(bytes): Promise` / `close()` /
-`signal`), so every target is a thin adapter over the same serializer — identical wire bytes
-wherever they go:
+**One engine underneath.** Every subpath is a thin adapter over one `FrameSink`
+(`write(bytes): Promise` / `close()` / `signal`) + the shared serializer, so the wire bytes
+are identical wherever they go. Two more escape hatches ride the same seam:
 
-- `sseResponse(contract, req, fn) → Response` — fetch runtimes (Hono, Next, Bun, Deno,
-  Workers). **Ship first.**
-- `toNodeHandler(contract, fn) → (req, res)` — Node `http` / Express / Fastify; writes to the
-  `ServerResponse` with `res.write()` / `'drain'` backpressure. **Ship second — biggest
-  coverage jump.**
-- `sseStream(contract, req, fn) → { stream, headers }` — the raw `ReadableStream` + headers,
-  for callers that build their own `Response` or want to tee/compose the stream.
+- `sseStream(contract, req, fn) → { stream, headers }` (from `ts-wire/sse/fetch`) — the raw
+  `ReadableStream` + headers, for callers that build their own `Response` or tee the stream.
 - `pipeSse(contract, fn, sink)` — write frames into any `WritableStream` / `Writable` you
   already hold.
 
-`FrameSink` is the public seam: anyone can adapt to a target we do not ship, without forking.
+`FrameSink` is the public seam: adapt to a runtime we do not ship, without forking.
 
 ## 4. The four hard forks (resolved, `tsc`-verified)
 
@@ -257,7 +264,7 @@ type-only helpers derive every surface from
 cookie auth, browser-owned reconnect + automatic `Last-Event-ID` resume · **one contract =
 one SSE** (no `path`, no router); shared `defineSse(...)` = optional `query` schema + `events`, with
 **no route config** — retry (`emit.retry`), resume
-(`emit.x(data,{id})` + `ctx.lastEventId`) and heartbeat (adapter option) are all **runtime**.
+(`emit.x(data,{id})` + `ctx.lastEventId`) and heartbeat (`ctx.init({ heartbeat })`) are all **runtime**.
 
 ## 6. Open questions (defaults chosen, revisit before 1.0)
 
@@ -283,10 +290,11 @@ per-event client-side validation, which nothing above has.**
 2. **`client`** ✅ — `initClient(contract, { url })` over native **`EventSource` only**
    (GET, cookie auth, browser-owned reconnect + automatic `Last-Event-ID` resume), typed
    `query` on `subscribe`, `.on` + async iterator over the decoded union, 3 error channels.
-3. **`server`** *(next)* — `sseResponse(contract, req, fn)` returning a `Response`; runtime
-   `ctx.init({ heartbeat, retry })`, typed `emit` with flush-promise backpressure, a
-   `FrameSink` + idle-gated heartbeat, EOS lifecycle, server-side `query` validation. Node
-   adapter later.
-4. **`react`**, Node server adapter, OpenAPI-ish event catalog docs.
+3. **`server`** ✅ — `ts-wire/sse/fetch` `sseResponse(contract, req, fn) → Response` +
+   `ts-wire/sse/node` `toNodeHandler`; runtime `ctx.init({ heartbeat, retry })`, typed `emit`
+   with flush-promise backpressure, a `FrameSink` + idle-gated heartbeat, EOS lifecycle,
+   server-side `query` validation. *(10 server tests)*
+4. **`ts-wire` rename/restructure** (`core` / `sse/*` / `ws/*` subpaths), `react` hook,
+   OpenAPI-ish event catalog docs.
 
 [Standard Schema v1]: https://standardschema.dev

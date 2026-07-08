@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { z } from "zod";
-import { serializeFrame, toOutgoingFrame } from "../src/core/serialize.js";
-import { parseSseText } from "../src/core/parse.js";
+import { serializeFrame, toOutgoingFrame } from "../src/sse/serialize.js";
+import { parseSseText } from "../src/sse/parse.js";
 import { validateSync } from "../src/core/schema.js";
-import { TS_SSE_EOS } from "../src/core/wire.js";
-import type { OutgoingFrame, RawFrame } from "../src/core/wire.js";
+import { TS_SSE_EOS } from "../src/sse/wire.js";
+import type { OutgoingFrame, RawFrame } from "../src/sse/wire.js";
 
 /** serialize a frame to bytes, then parse the bytes back to frames. */
 const roundtrip = (f: OutgoingFrame): RawFrame[] =>

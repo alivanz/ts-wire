@@ -1,5 +1,5 @@
 /**
- * Public entry for `@alivan/ts-sse/client`.
+ * Public entry for `ts-wire/sse/client`.
  *
  * `client.ts` is transport-agnostic (testable with a fake). This barrel is the one
  * place that wires the real native-EventSource transport, so end users just call
@@ -7,7 +7,7 @@
  */
 import { initClient as initClientCore } from "./client.js";
 import { eventSourceTransport } from "./eventsource-transport.js";
-import type { SseDef } from "../core/contract.js";
+import type { SseDef } from "../contract.js";
 import type { InitClientOptions, SseEndpoint } from "./types.js";
 
 /** Create a fully-typed SSE client from a contract, with the EventSource transport wired in. */

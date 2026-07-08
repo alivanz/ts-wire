@@ -19,8 +19,8 @@ import type {
   MessageEventLike,
   TransportFactory,
 } from "./types.js";
-import type { RawFrame } from "../core/wire.js";
-import { TS_SSE_EOS } from "../core/wire.js";
+import type { RawFrame } from "../wire.js";
+import { TS_SSE_EOS } from "../wire.js";
 import { SseConnectionError } from "./errors.js";
 
 /** `EventSourceLike.readyState` values: 0 CONNECTING, 1 OPEN, 2 CLOSED. */
