@@ -2,6 +2,8 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
-    include: ["test/**/*.test.ts"],
+    // Unit tests only. Integration tests (real servers/clients) live in
+    // test/integration and run via `pnpm test:integration`.
+    include: ["test/*.test.ts"],
   },
 });

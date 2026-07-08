@@ -28,10 +28,11 @@ validation, `type`-only client import. See `DESIGN.md` (SSE) and `DESIGN-ws.md` 
 
 | Script            | Does                              |
 | ----------------- | --------------------------------- |
-| `pnpm build`      | Compile to `dist/`                |
-| `pnpm typecheck`  | Type-check without emitting       |
-| `pnpm test`       | Run the vitest suite              |
-| `pnpm clean`      | Remove `dist/`                    |
+| `pnpm build`             | Compile to `dist/`                                   |
+| `pnpm typecheck`         | Type-check without emitting                          |
+| `pnpm test`              | Unit tests (hermetic, with fakes)                    |
+| `pnpm test:integration`  | Real loopback tests — actual http/ws server ↔ client |
+| `pnpm clean`             | Remove `dist/`                                       |
 
 ## License
 
