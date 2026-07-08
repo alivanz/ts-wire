@@ -1,11 +1,12 @@
 {
   "name": "ts-wire",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Contract-first realtime for TypeScript — ts-rest, but for SSE (and WebSocket)",
   "type": "module",
+  "sideEffects": false,
   "packageManager": "pnpm@10.32.1",
   "engines": {
-    "node": ">=22"
+    "node": ">=18"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -52,16 +53,16 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "src"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "dev": "tsx watch src/index.ts",
-    "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "prepublishOnly": "pnpm run clean && pnpm run typecheck && pnpm run test && pnpm run build"
   },
   "keywords": [
     "realtime",
@@ -75,6 +76,16 @@
     "standard-schema"
   ],
   "license": "MIT",
+  "author": "Alivan Akbar <alivan1627@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alivanz/ts-wire.git"
+  },
+  "homepage": "https://github.com/alivanz/ts-wire#readme",
+  "bugs": "https://github.com/alivanz/ts-wire/issues",
+  "publishConfig": {
+    "access": "public"
+  },
   "pnpm": {
     "onlyBuiltDependencies": [
       "esbuild"
