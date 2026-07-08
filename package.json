@@ -33,6 +33,22 @@
     "./sse/node": {
       "types": "./dist/sse/node/index.d.ts",
       "import": "./dist/sse/node/index.js"
+    },
+    "./ws": {
+      "types": "./dist/ws/index.d.ts",
+      "import": "./dist/ws/index.js"
+    },
+    "./ws/client": {
+      "types": "./dist/ws/client/index.d.ts",
+      "import": "./dist/ws/client/index.js"
+    },
+    "./ws/cf": {
+      "types": "./dist/ws/cf/index.d.ts",
+      "import": "./dist/ws/cf/index.js"
+    },
+    "./ws/node": {
+      "types": "./dist/ws/node/index.d.ts",
+      "import": "./dist/ws/node/index.js"
     }
   },
   "files": [
