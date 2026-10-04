@@ -3,6 +3,7 @@ import { z } from "zod";
 import { defineSse } from "../src/sse/contract.js";
 import { initClient, type ClientDeps } from "../src/sse/client/client.js";
 import type {
+  EventSourceCtor,
   InitClientOptions,
   Transport,
   TransportConfig,
@@ -202,6 +203,38 @@ describe("initClient — validation", () => {
 // ── Error + lifecycle channels ──────────────────────────────────────────────
 
 describe("initClient — error & lifecycle channels", () => {
+  it("an error raised synchronously during start reaches listeners registered after subscribe", async () => {
+    const fatal = new SseConnectionError({ kind: "network", retriable: false, message: "boom" });
+    const transport: TransportFactory = (_config, handlers) => ({
+      start: () => handlers.onError(fatal),
+      close: vi.fn(),
+    });
+    const sub = initClient(chatContract, options(), deps(transport)).subscribe();
+
+    const connErrors: SseConnectionError[] = [];
+    sub.onConnectionError((err) => connErrors.push(err));
+    const pull = sub[Symbol.asyncIterator]().next();
+
+    await expect(pull).rejects.toBe(fatal);
+    expect(connErrors).toEqual([fatal]);
+    expect(sub.state).toBe("closed");
+  });
+
+  it("a synchronous start error is dropped if the caller closes first", async () => {
+    const fatal = new SseConnectionError({ kind: "network", retriable: false, message: "boom" });
+    const transport: TransportFactory = (_config, handlers) => ({
+      start: () => handlers.onError(fatal),
+      close: vi.fn(),
+    });
+    const sub = initClient(chatContract, options(), deps(transport)).subscribe();
+    const connErrors: SseConnectionError[] = [];
+    sub.onConnectionError((err) => connErrors.push(err));
+    sub.close();
+    await tick();
+
+    expect(connErrors).toEqual([]);
+  });
+
   it("a fatal onError rejects the iterator and closes the state", async () => {
     const fake = makeFakeTransport();
     const endpoint = initClient(chatContract, options(), deps(fake.transport));
@@ -299,5 +332,34 @@ describe("initClient — wiring", () => {
   it("throws a clear error when the transport is not injected", () => {
     const endpoint = initClient(chatContract, options()); // no deps
     expect(() => endpoint.subscribe()).toThrow(/transport not wired/);
+  });
+
+  it("defaults to the global EventSource when none is passed", () => {
+    class GlobalEventSource {}
+    vi.stubGlobal("EventSource", GlobalEventSource);
+    try {
+      const fake = makeFakeTransport();
+      initClient(chatContract, options(), deps(fake.transport)).subscribe();
+      expect(only(fake.calls).config.EventSourceImpl).toBe(GlobalEventSource);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("an injected EventSource wins over the global", () => {
+    class GlobalEventSource {}
+    class Injected {}
+    vi.stubGlobal("EventSource", GlobalEventSource);
+    try {
+      const fake = makeFakeTransport();
+      initClient(
+        chatContract,
+        options({ EventSource: Injected as unknown as EventSourceCtor }),
+        deps(fake.transport),
+      ).subscribe();
+      expect(only(fake.calls).config.EventSourceImpl).toBe(Injected);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

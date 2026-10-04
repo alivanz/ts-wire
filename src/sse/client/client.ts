@@ -33,6 +33,7 @@ import type {
   AnySubscribeArgs,
   ClientEvent,
   EventMeta,
+  EventSourceCtor,
   InitClientOptions,
   SseClientState,
   SseEndpoint,
@@ -279,6 +280,15 @@ function createSubscription(
       decodeFrame(frame);
     },
     onError(err) {
+      // An error raised synchronously inside `t.start()` (e.g. no EventSource
+      // implementation) would fire before `subscribe()` returns — before the caller
+      // could register `onConnectionError`. Defer it one microtask so it is seen.
+      if (starting) {
+        queueMicrotask(() => {
+          if (!userClosed) transportHandlers.onError(err);
+        });
+        return;
+      }
       // The reconnect-driving channel.
       for (const cb of connErrorListeners) cb(err);
       if (err.retriable) {
@@ -301,14 +311,18 @@ function createSubscription(
     url,
     eventNames: Object.keys(contract.events),
     withCredentials: options.withCredentials,
-    EventSourceImpl: options.EventSource,
+    // Documented default: the global EventSource (browsers, Node >= 22 with the flag, Deno, Bun).
+    EventSourceImpl:
+      options.EventSource ??
+      (globalThis as { EventSource?: EventSourceCtor }).EventSource,
     signal: args?.signal,
   };
 
+  let userClosed = false;
+  let starting = true;
   const t: Transport = transport(config, transportHandlers);
   t.start();
-
-  let userClosed = false;
+  starting = false;
 
   /** Caller-driven permanent stop: close the transport and complete the iterator. */
   function close(): void {
