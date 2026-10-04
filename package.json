@@ -1,6 +1,6 @@
 {
   "name": "@alivanz/ts-wire",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Contract-first realtime for TypeScript — ts-rest, but for SSE (and WebSocket)",
   "type": "module",
   "sideEffects": false,
